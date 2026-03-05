@@ -28,6 +28,8 @@ MANUAL_COST = {
 
 def get_tokens_from_supabase():
     """Supabase에서 토큰 읽기"""
+    print("SUPABASE_URL:", SUPABASE_URL)
+    print("SUPABASE_KEY:", SUPABASE_KEY[:10] if SUPABASE_KEY else None)
     try:
         url = SUPABASE_URL + "/rest/v1/tokens?id=eq.1&select=access_token,refresh_token"
         headers = {
