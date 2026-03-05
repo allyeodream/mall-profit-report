@@ -28,11 +28,8 @@ MANUAL_COST = {
 }
 
 def update_railway_variable(key, value):
-    """Railway 환경변수 자동 업데이트"""
     if not RAILWAY_API_TOKEN or not SERVICE_ID or not ENVIRONMENT_ID:
-        print("⚠️ Railway API 설정 없음 - 변수 업데이트 건너뜀")
         return False
-
     query = """
     mutation($serviceId: String!, $environmentId: String!, $name: String!, $value: String!) {
         variableUpsert(input: {
@@ -56,17 +53,21 @@ def update_railway_variable(key, value):
         "Authorization": "Bearer " + RAILWAY_API_TOKEN,
         "Content-Type": "application/json"
     }
-    r = requests.post(
-        "https://backboard.railway.app/graphql/v2",
-        json=payload,
-        headers=headers
-    )
-    data = r.json()
-    if "errors" not in data:
-        print("✅ Railway 변수 업데이트 성공: " + key)
-        return True
-    else:
-        print("❌ Railway 변수 업데이트 실패: " + str(data))
+    try:
+        r = requests.post(
+            "https://backboard.railway.app/graphql/v2",
+            json=payload,
+            headers=headers
+        )
+        data = r.json()
+        if "errors" not in data:
+            print("✅ Railway 변수 저장 성공: " + key)
+            return True
+        else:
+            print("⚠️ Railway 변수 저장 실패: " + key)
+            return False
+    except Exception as e:
+        print("⚠️ Railway 변수 저장 오류: " + str(e))
         return False
 
 def get_tokens():
@@ -74,20 +75,33 @@ def get_tokens():
     refresh = os.environ.get("REFRESH_TOKEN")
     return access, refresh
 
-def refresh_access_token(refresh_token):
-    url = "https://" + MALL_ID + ".cafe24api.com/api/v2/oauth/token"
-    response = requests.post(url,
-        auth=(CLIENT_ID, CLIENT_SECRET),
-        data={"grant_type": "refresh_token", "refresh_token": refresh_token}
-    )
-    data = response.json()
-    if "access_token" in data:
-        new_access = data["access_token"]
-        new_refresh = data.get("refresh_token", refresh_token)
-        # Railway 변수 자동 업데이트
-        update_railway_variable("ACCESS_TOKEN", new_access)
-        update_railway_variable("REFRESH_TOKEN", new_refresh)
-        return new_access
+def get_valid_token():
+    access_token, refresh_token = get_tokens()
+
+    # refresh_token으로 갱신 시도
+    if refresh_token:
+        url = "https://" + MALL_ID + ".cafe24api.com/api/v2/oauth/token"
+        try:
+            response = requests.post(url,
+                auth=(CLIENT_ID, CLIENT_SECRET),
+                data={"grant_type": "refresh_token", "refresh_token": refresh_token}
+            )
+            data = response.json()
+            if "access_token" in data:
+                new_access = data["access_token"]
+                new_refresh = data.get("refresh_token", refresh_token)
+                update_railway_variable("ACCESS_TOKEN", new_access)
+                update_railway_variable("REFRESH_TOKEN", new_refresh)
+                print("✅ 토큰 갱신 성공")
+                return new_access
+        except Exception as e:
+            print("⚠️ 토큰 갱신 오류: " + str(e))
+
+    # 갱신 실패시 기존 access_token 시도
+    if access_token:
+        print("⚠️ 기존 토큰으로 시도...")
+        return access_token
+
     return None
 
 def get_products(token):
@@ -144,9 +158,7 @@ def calc_profit(order, items, cost_map):
     for item in items:
         product_no = item.get("product_no")
         qty = int(item.get("quantity") or 1)
-        # 주문 아이템에서 직접 supply_price 읽기
         supply = float(item.get("supply_price") or 0)
-        # supply_price 없으면 cost_map에서 찾기
         if supply == 0:
             supply = cost_map.get(product_no, 0)
         cost_with_vat = supply * (1 + VAT_RATE)
@@ -168,19 +180,11 @@ def calc_profit(order, items, cost_map):
     }
 
 def main():
-    _, refresh_token = get_tokens()
-
-    if not refresh_token:
-        print("오류: REFRESH_TOKEN 환경변수가 없습니다.")
-        return
-
-    print("토큰 갱신 중...")
-    token = refresh_access_token(refresh_token)
+    token = get_valid_token()
     if not token:
-        print("오류: 토큰 갱신 실패")
+        print("오류: 토큰 없음. Railway 변수에 REFRESH_TOKEN을 설정해주세요.")
         return
 
-    print("✅ 토큰 갱신 성공")
     print("상품 원가 불러오는 중...")
     cost_map = get_products(token)
 
