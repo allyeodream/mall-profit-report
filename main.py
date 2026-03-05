@@ -12,10 +12,11 @@ MALL_ID = "tpgus432"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-SHIPPING_COST = 3000
-FREE_SHIPPING_MIN = 70000
-PG_FEE_RATE = 0.022
-VAT_RATE = 0.1
+SHIPPING_COST_ACTUAL = 1980    # 실제 택배비 (부가세 포함)
+SHIPPING_FEE_CHARGED = 3000    # 고객한테 받는 택배비
+FREE_SHIPPING_MIN = 70000      # 무료배송 기준금액
+PG_FEE_RATE = 0.022            # PG수수료 (나중에 디테일하게 수정)
+VAT_RATE = 0.1                 # 부가세 10%
 
 MONTHLY_FIXED_COSTS = {
     "카페24_이용료": 0,
@@ -74,7 +75,6 @@ def get_valid_token():
     access_token, refresh_token = get_tokens_from_supabase()
 
     if not refresh_token:
-        # Supabase 실패시 환경변수에서 읽기
         access_token = os.environ.get("ACCESS_TOKEN")
         refresh_token = os.environ.get("REFRESH_TOKEN")
 
@@ -161,16 +161,21 @@ def calc_profit(order, items, cost_map):
         cost_with_vat = supply * (1 + VAT_RATE)
         total_cost += cost_with_vat * qty
 
-    shipping = 0 if payment >= FREE_SHIPPING_MIN else SHIPPING_COST
+    # 택배비: 7만원 이상이면 내가 1980원 부담, 미만이면 3000원 받고 1980원 냄
+    if payment >= FREE_SHIPPING_MIN:
+        shipping_net = SHIPPING_COST_ACTUAL          # 1980원 비용
+    else:
+        shipping_net = SHIPPING_COST_ACTUAL - SHIPPING_FEE_CHARGED  # -1020원 (이득)
+
     pg_fee = payment * PG_FEE_RATE
-    profit = payment - total_cost - shipping - pg_fee
+    profit = payment - total_cost - shipping_net - pg_fee
 
     return {
         "주문일": order.get("order_date", "")[:10],
         "주문번호": order.get("order_id", ""),
         "매출": payment,
         "원가_부가세포함": round(total_cost),
-        "택배비": shipping,
+        "택배비_순": round(shipping_net),
         "PG수수료": round(pg_fee),
         "순수익": round(profit),
         "순이익률": round((profit / payment * 100), 1) if payment > 0 else 0
@@ -198,7 +203,7 @@ def main():
     today_str = datetime.now().strftime("%m월 %d일")
     total_sales = sum(r["매출"] for r in results)
     total_cost = sum(r["원가_부가세포함"] for r in results)
-    total_shipping = sum(r["택배비"] for r in results)
+    total_shipping = sum(r["택배비_순"] for r in results)
     total_pg = sum(r["PG수수료"] for r in results)
     daily_fixed = get_daily_fixed_cost()
     total_profit = sum(r["순수익"] for r in results) - daily_fixed
@@ -206,7 +211,7 @@ def main():
     print("\n📊 [" + today_str + " 리포트]")
     print("💰 매출        " + f"{int(total_sales):>12,}원")
     print("📦 원가(부가세포함) " + f"{int(total_cost):>8,}원")
-    print("🚚 택배비       " + f"{int(total_shipping):>12,}원")
+    print("🚚 택배비(순)   " + f"{int(total_shipping):>12,}원")
     print("💳 PG수수료     " + f"{int(total_pg):>12,}원")
     print("🏢 고정비용     " + f"{int(daily_fixed):>12,}원")
     print("─────────────────────────────")
