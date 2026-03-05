@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 CLIENT_ID = "SzSf7z1hDSMW7vPXHOExoD"
 CLIENT_SECRET = "wvQ7TNzkEl1itP1MTSbWVD"
 MALL_ID = "tpgus432"
+RAILWAY_API_TOKEN = os.environ.get("RAILWAY_API_TOKEN")
+SERVICE_ID = os.environ.get("RAILWAY_SERVICE_ID")
+ENVIRONMENT_ID = os.environ.get("RAILWAY_ENVIRONMENT_ID")
 
 SHIPPING_COST = 3000
 FREE_SHIPPING_MIN = 70000
@@ -24,6 +27,41 @@ MANUAL_COST = {
     3441: 22000,
 }
 
+def update_railway_variable(key, value):
+    """Railway 환경변수 자동 업데이트"""
+    if not RAILWAY_API_TOKEN or not SERVICE_ID or not ENVIRONMENT_ID:
+        print("⚠️ Railway API 설정 없음 - 변수 업데이트 건너뜀")
+        return False
+
+    query = """
+    mutation variableUpsert($input: VariableUpsertInput!) {
+        variableUpsert(input: $input)
+    }
+    """
+    variables = {
+        "input": {
+            "serviceId": SERVICE_ID,
+            "environmentId": ENVIRONMENT_ID,
+            "name": key,
+            "value": value
+        }
+    }
+    headers = {
+        "Authorization": "Bearer " + RAILWAY_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+    r = requests.post(
+        "https://backboard.railway.com/graphql/v2",
+        json={"query": query, "variables": variables},
+        headers=headers
+    )
+    if r.status_code == 200:
+        print("✅ Railway 변수 업데이트 성공: " + key)
+        return True
+    else:
+        print("❌ Railway 변수 업데이트 실패: " + str(r.text))
+        return False
+
 def get_tokens():
     access = os.environ.get("ACCESS_TOKEN")
     refresh = os.environ.get("REFRESH_TOKEN")
@@ -37,7 +75,12 @@ def refresh_access_token(refresh_token):
     )
     data = response.json()
     if "access_token" in data:
-        return data["access_token"]
+        new_access = data["access_token"]
+        new_refresh = data.get("refresh_token", refresh_token)
+        # Railway 변수 자동 업데이트
+        update_railway_variable("ACCESS_TOKEN", new_access)
+        update_railway_variable("REFRESH_TOKEN", new_refresh)
+        return new_access
     return None
 
 def get_products(token):
@@ -114,12 +157,13 @@ def calc_profit(order, items, cost_map):
     }
 
 def main():
-    access_token, refresh_token = get_tokens()
+    _, refresh_token = get_tokens()
 
     if not refresh_token:
         print("오류: REFRESH_TOKEN 환경변수가 없습니다.")
         return
 
+    print("토큰 갱신 중...")
     token = refresh_access_token(refresh_token)
     if not token:
         print("오류: 토큰 갱신 실패")
