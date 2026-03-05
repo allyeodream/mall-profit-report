@@ -128,7 +128,7 @@ def get_orders(token, days=1):
         "Content-Type": "application/json",
         "X-Cafe24-Api-Version": "2025-12-01"
     }
-    params = {"start_date": start, "end_date": end, "limit": 100}
+    params = {"start_date": start, "end_date": end, "limit": 100, "canceled": "F"}
     r = requests.get(url, headers=headers, params=params)
     return r.json().get("orders", [])
 
