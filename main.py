@@ -9,9 +9,8 @@ from datetime import datetime, timedelta
 CLIENT_ID = "SzSf7z1hDSMW7vPXHOExoD"
 CLIENT_SECRET = "wvQ7TNzkEl1itP1MTSbWVD"
 MALL_ID = "tpgus432"
-RAILWAY_API_TOKEN = os.environ.get("RAILWAY_API_TOKEN")
-SERVICE_ID = os.environ.get("RAILWAY_SERVICE_ID")
-ENVIRONMENT_ID = os.environ.get("RAILWAY_ENVIRONMENT_ID")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 SHIPPING_COST = 3000
 FREE_SHIPPING_MIN = 70000
@@ -27,58 +26,56 @@ MANUAL_COST = {
     3441: 22000,
 }
 
-def update_railway_variable(key, value):
-    if not RAILWAY_API_TOKEN or not SERVICE_ID or not ENVIRONMENT_ID:
-        return False
-    query = """
-    mutation($serviceId: String!, $environmentId: String!, $name: String!, $value: String!) {
-        variableUpsert(input: {
-            serviceId: $serviceId,
-            environmentId: $environmentId,
-            name: $name,
-            value: $value
-        })
-    }
-    """
-    payload = {
-        "query": query,
-        "variables": {
-            "serviceId": SERVICE_ID,
-            "environmentId": ENVIRONMENT_ID,
-            "name": key,
-            "value": value
-        }
-    }
-    headers = {
-        "Authorization": "Bearer " + RAILWAY_API_TOKEN,
-        "Content-Type": "application/json"
-    }
+def get_tokens_from_supabase():
+    """Supabase에서 토큰 읽기"""
     try:
-        r = requests.post(
-            "https://backboard.railway.app/graphql/v2",
-            json=payload,
-            headers=headers
-        )
+        url = SUPABASE_URL + "/rest/v1/tokens?id=eq.1&select=access_token,refresh_token"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY
+        }
+        r = requests.get(url, headers=headers)
         data = r.json()
-        if "errors" not in data:
-            print("✅ Railway 변수 저장 성공: " + key)
+        if data and len(data) > 0:
+            return data[0]["access_token"], data[0]["refresh_token"]
+    except Exception as e:
+        print("⚠️ Supabase 토큰 읽기 실패: " + str(e))
+    return None, None
+
+def save_tokens_to_supabase(access_token, refresh_token):
+    """Supabase에 토큰 저장"""
+    try:
+        url = SUPABASE_URL + "/rest/v1/tokens?id=eq.1"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        data = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "updated_at": datetime.now().isoformat()
+        }
+        r = requests.patch(url, headers=headers, json=data)
+        if r.status_code in [200, 204]:
+            print("✅ Supabase 토큰 저장 성공")
             return True
         else:
-            print("⚠️ Railway 변수 저장 실패: " + key)
+            print("⚠️ Supabase 토큰 저장 실패: " + str(r.text))
             return False
     except Exception as e:
-        print("⚠️ Railway 변수 저장 오류: " + str(e))
+        print("⚠️ Supabase 토큰 저장 오류: " + str(e))
         return False
 
-def get_tokens():
-    access = os.environ.get("ACCESS_TOKEN")
-    refresh = os.environ.get("REFRESH_TOKEN")
-    return access, refresh
-
 def get_valid_token():
-    access_token, refresh_token = get_tokens()
+    access_token, refresh_token = get_tokens_from_supabase()
 
-    # refresh_token으로 갱신 시도
+    if not refresh_token:
+        # Supabase 실패시 환경변수에서 읽기
+        access_token = os.environ.get("ACCESS_TOKEN")
+        refresh_token = os.environ.get("REFRESH_TOKEN")
+
     if refresh_token:
         url = "https://" + MALL_ID + ".cafe24api.com/api/v2/oauth/token"
         try:
@@ -90,14 +87,12 @@ def get_valid_token():
             if "access_token" in data:
                 new_access = data["access_token"]
                 new_refresh = data.get("refresh_token", refresh_token)
-                update_railway_variable("ACCESS_TOKEN", new_access)
-                update_railway_variable("REFRESH_TOKEN", new_refresh)
+                save_tokens_to_supabase(new_access, new_refresh)
                 print("✅ 토큰 갱신 성공")
                 return new_access
         except Exception as e:
             print("⚠️ 토큰 갱신 오류: " + str(e))
 
-    # 갱신 실패시 기존 access_token 시도
     if access_token:
         print("⚠️ 기존 토큰으로 시도...")
         return access_token
@@ -182,7 +177,7 @@ def calc_profit(order, items, cost_map):
 def main():
     token = get_valid_token()
     if not token:
-        print("오류: 토큰 없음. Railway 변수에 REFRESH_TOKEN을 설정해주세요.")
+        print("오류: 토큰 없음")
         return
 
     print("상품 원가 불러오는 중...")
