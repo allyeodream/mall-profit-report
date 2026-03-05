@@ -137,8 +137,12 @@ def calc_profit(order, items, cost_map):
     for item in items:
         product_no = item.get("product_no")
         qty = int(item.get("quantity") or 1)
-        cost = cost_map.get(product_no, 0)
-        cost_with_vat = cost * (1 + VAT_RATE)
+        # 주문 아이템에서 직접 supply_price 읽기
+        supply = float(item.get("supply_price") or 0)
+        # supply_price 없으면 cost_map에서 찾기
+        if supply == 0:
+            supply = cost_map.get(product_no, 0)
+        cost_with_vat = supply * (1 + VAT_RATE)
         total_cost += cost_with_vat * qty
 
     shipping = 0 if payment >= FREE_SHIPPING_MIN else SHIPPING_COST
