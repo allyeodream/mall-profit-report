@@ -34,12 +34,18 @@ def update_railway_variable(key, value):
         return False
 
     query = """
-    mutation variableUpsert($input: VariableUpsertInput!) {
-        variableUpsert(input: $input)
+    mutation($serviceId: String!, $environmentId: String!, $name: String!, $value: String!) {
+        variableUpsert(input: {
+            serviceId: $serviceId,
+            environmentId: $environmentId,
+            name: $name,
+            value: $value
+        })
     }
     """
-    variables = {
-        "input": {
+    payload = {
+        "query": query,
+        "variables": {
             "serviceId": SERVICE_ID,
             "environmentId": ENVIRONMENT_ID,
             "name": key,
@@ -51,15 +57,16 @@ def update_railway_variable(key, value):
         "Content-Type": "application/json"
     }
     r = requests.post(
-        "https://backboard.railway.com/graphql/v2",
-        json={"query": query, "variables": variables},
+        "https://backboard.railway.app/graphql/v2",
+        json=payload,
         headers=headers
     )
-    if r.status_code == 200:
+    data = r.json()
+    if "errors" not in data:
         print("✅ Railway 변수 업데이트 성공: " + key)
         return True
     else:
-        print("❌ Railway 변수 업데이트 실패: " + str(r.text))
+        print("❌ Railway 변수 업데이트 실패: " + str(data))
         return False
 
 def get_tokens():
