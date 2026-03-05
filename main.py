@@ -12,11 +12,11 @@ MALL_ID = "tpgus432"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-SHIPPING_COST_ACTUAL = 1980    # 실제 택배비 (부가세 포함)
-SHIPPING_FEE_CHARGED = 3000    # 고객한테 받는 택배비
-FREE_SHIPPING_MIN = 70000      # 무료배송 기준금액
-PG_FEE_RATE = 0.022            # PG수수료 (나중에 디테일하게 수정)
-VAT_RATE = 0.1                 # 부가세 10%
+SHIPPING_COST_ACTUAL = 1980
+SHIPPING_FEE_CHARGED = 3000
+FREE_SHIPPING_MIN = 70000
+PG_FEE_RATE = 0.022
+VAT_RATE = 0.1
 
 MONTHLY_FIXED_COSTS = {
     "카페24_이용료": 0,
@@ -28,9 +28,6 @@ MANUAL_COST = {
 }
 
 def get_tokens_from_supabase():
-    """Supabase에서 토큰 읽기"""
-    print("SUPABASE_URL:", SUPABASE_URL)
-    print("SUPABASE_KEY:", SUPABASE_KEY[:10] if SUPABASE_KEY else None)
     try:
         url = SUPABASE_URL + "/rest/v1/tokens?id=eq.1&select=access_token,refresh_token"
         headers = {
@@ -46,7 +43,6 @@ def get_tokens_from_supabase():
     return None, None
 
 def save_tokens_to_supabase(access_token, refresh_token):
-    """Supabase에 토큰 저장"""
     try:
         url = SUPABASE_URL + "/rest/v1/tokens?id=eq.1"
         headers = {
@@ -64,12 +60,9 @@ def save_tokens_to_supabase(access_token, refresh_token):
         if r.status_code in [200, 204]:
             print("✅ Supabase 토큰 저장 성공")
             return True
-        else:
-            print("⚠️ Supabase 토큰 저장 실패: " + str(r.text))
-            return False
     except Exception as e:
         print("⚠️ Supabase 토큰 저장 오류: " + str(e))
-        return False
+    return False
 
 def get_valid_token():
     access_token, refresh_token = get_tokens_from_supabase()
@@ -118,19 +111,40 @@ def get_products(token):
         cost_map[no] = MANUAL_COST.get(no, supply)
     return cost_map
 
-def get_orders(token, days=1):
-    today = datetime.now()
-    start = (today - timedelta(days=days)).strftime("%Y-%m-%d")
-    end = today.strftime("%Y-%m-%d")
+def get_orders(token, date_str):
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
     headers = {
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
         "X-Cafe24-Api-Version": "2025-12-01"
     }
-    params = {"start_date": start, "end_date": end, "limit": 100, "canceled": "F"}
+    params = {
+        "start_date": date_str,
+        "end_date": date_str,
+        "limit": 100,
+        "canceled": "F"
+    }
     r = requests.get(url, headers=headers, params=params)
     return r.json().get("orders", [])
+
+def get_refunds(token, date_str):
+    """당일 환불된 주문 가져오기"""
+    url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
+    headers = {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+        "X-Cafe24-Api-Version": "2025-12-01"
+    }
+    params = {
+        "start_date": date_str,
+        "end_date": date_str,
+        "limit": 100,
+        "canceled": "T"
+    }
+    r = requests.get(url, headers=headers, params=params)
+    orders = r.json().get("orders", [])
+    total_refund = sum(float(o.get("payment_amount") or 0) for o in orders)
+    return round(total_refund), len(orders)
 
 def get_order_items(token, order_id):
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders/" + str(order_id) + "/items"
@@ -161,11 +175,10 @@ def calc_profit(order, items, cost_map):
         cost_with_vat = supply * (1 + VAT_RATE)
         total_cost += cost_with_vat * qty
 
-    # 택배비: 7만원 이상이면 내가 1980원 부담, 미만이면 3000원 받고 1980원 냄
     if payment >= FREE_SHIPPING_MIN:
-        shipping_net = SHIPPING_COST_ACTUAL          # 1980원 비용
+        shipping_net = SHIPPING_COST_ACTUAL
     else:
-        shipping_net = SHIPPING_COST_ACTUAL - SHIPPING_FEE_CHARGED  # -1020원 (이득)
+        shipping_net = SHIPPING_COST_ACTUAL - SHIPPING_FEE_CHARGED
 
     pg_fee = payment * PG_FEE_RATE
     profit = payment - total_cost - shipping_net - pg_fee
@@ -187,11 +200,18 @@ def main():
         print("오류: 토큰 없음")
         return
 
+    yesterday = datetime.now() - timedelta(days=1)
+    yesterday_str = yesterday.strftime("%Y-%m-%d")
+    yesterday_display = yesterday.strftime("%m월 %d일")
+
     print("상품 원가 불러오는 중...")
     cost_map = get_products(token)
 
-    print("오늘 주문 데이터 불러오는 중...")
-    orders = get_orders(token, days=1)
+    print("어제(" + yesterday_display + ") 주문 데이터 불러오는 중...")
+    orders = get_orders(token, yesterday_str)
+
+    print("환불 데이터 불러오는 중...")
+    total_refund, refund_count = get_refunds(token, yesterday_str)
 
     results = []
     for order in orders:
@@ -200,24 +220,27 @@ def main():
         if result:
             results.append(result)
 
-    today_str = datetime.now().strftime("%m월 %d일")
     total_sales = sum(r["매출"] for r in results)
     total_cost = sum(r["원가_부가세포함"] for r in results)
     total_shipping = sum(r["택배비_순"] for r in results)
     total_pg = sum(r["PG수수료"] for r in results)
     daily_fixed = get_daily_fixed_cost()
-    total_profit = sum(r["순수익"] for r in results) - daily_fixed
+    net_sales = total_sales - total_refund
+    total_profit = net_sales - total_cost - total_shipping - total_pg - daily_fixed
 
-    print("\n📊 [" + today_str + " 리포트]")
+    print("\n📊 [" + yesterday_display + " 리포트]")
     print("💰 매출        " + f"{int(total_sales):>12,}원")
+    print("↩️  환불        " + f"{int(total_refund):>12,}원  ({refund_count}건)")
+    print("💰 순매출      " + f"{int(net_sales):>12,}원")
+    print("─────────────────────────────")
     print("📦 원가(부가세포함) " + f"{int(total_cost):>8,}원")
     print("🚚 택배비(순)   " + f"{int(total_shipping):>12,}원")
     print("💳 PG수수료     " + f"{int(total_pg):>12,}원")
     print("🏢 고정비용     " + f"{int(daily_fixed):>12,}원")
     print("─────────────────────────────")
     print("✅ 순수익       " + f"{int(total_profit):>12,}원")
-    if total_sales > 0:
-        print("📈 순이익률     " + f"{round(total_profit/total_sales*100, 1)}%")
+    if net_sales > 0:
+        print("📈 순이익률     " + f"{round(total_profit/net_sales*100, 1)}%")
 
 if __name__ == "__main__":
     main()
