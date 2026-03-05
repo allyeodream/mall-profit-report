@@ -4,48 +4,32 @@ import os
 from datetime import datetime, timedelta
 
 # =============================
-# 설정값 (여기서 수정하세요)
+# 설정값
 # =============================
 CLIENT_ID = "SzSf7z1hDSMW7vPXHOExoD"
 CLIENT_SECRET = "wvQ7TNzkEl1itP1MTSbWVD"
 MALL_ID = "tpgus432"
-TOKEN_FILE = "tokens.json"
 
 SHIPPING_COST = 3000
 FREE_SHIPPING_MIN = 70000
 PG_FEE_RATE = 0.022
-VAT_RATE = 0.1  # 부가세 10%
+VAT_RATE = 0.1
 
-# 월 고정비용 (일割 계산됨)
 MONTHLY_FIXED_COSTS = {
-    "카페24_이용료": 0,      # 실제 금액으로 수정해주세요
-    "기타_SaaS": 0,          # 실제 금액으로 수정해주세요
+    "카페24_이용료": 0,
+    "기타_SaaS": 0,
 }
 
-# 카페24에 공급가 없는 상품 수동 입력
 MANUAL_COST = {
     3441: 22000,
 }
 
-def save_tokens(access_token, refresh_token):
-    with open(TOKEN_FILE, "w") as f:
-        json.dump({
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "saved_at": datetime.now().isoformat()
-        }, f)
+def get_tokens():
+    access = os.environ.get("ACCESS_TOKEN")
+    refresh = os.environ.get("REFRESH_TOKEN")
+    return access, refresh
 
-def load_tokens():
-    if not os.path.exists(TOKEN_FILE):
-        return None, None
-    with open(TOKEN_FILE, "r") as f:
-        data = json.load(f)
-    return data.get("access_token"), data.get("refresh_token")
-
-def get_access_token():
-    _, refresh_token = load_tokens()
-    if not refresh_token:
-        return None
+def refresh_access_token(refresh_token):
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/oauth/token"
     response = requests.post(url,
         auth=(CLIENT_ID, CLIENT_SECRET),
@@ -53,7 +37,6 @@ def get_access_token():
     )
     data = response.json()
     if "access_token" in data:
-        save_tokens(data["access_token"], data["refresh_token"])
         return data["access_token"]
     return None
 
@@ -112,7 +95,7 @@ def calc_profit(order, items, cost_map):
         product_no = item.get("product_no")
         qty = int(item.get("quantity") or 1)
         cost = cost_map.get(product_no, 0)
-        cost_with_vat = cost * (1 + VAT_RATE)  # 부가세 포함
+        cost_with_vat = cost * (1 + VAT_RATE)
         total_cost += cost_with_vat * qty
 
     shipping = 0 if payment >= FREE_SHIPPING_MIN else SHIPPING_COST
@@ -131,20 +114,18 @@ def calc_profit(order, items, cost_map):
     }
 
 def main():
-    _, refresh_token = load_tokens()
-    if not refresh_token:
-        print("처음 실행입니다. 토큰을 입력해주세요.")
-        access = input("access_token: ").strip()
-        refresh = input("refresh_token: ").strip()
-        save_tokens(access, refresh)
-        token = access
-    else:
-        token = get_access_token()
+    access_token, refresh_token = get_tokens()
 
-    if not token:
-        print("토큰 오류")
+    if not refresh_token:
+        print("오류: REFRESH_TOKEN 환경변수가 없습니다.")
         return
 
+    token = refresh_access_token(refresh_token)
+    if not token:
+        print("오류: 토큰 갱신 실패")
+        return
+
+    print("✅ 토큰 갱신 성공")
     print("상품 원가 불러오는 중...")
     cost_map = get_products(token)
 
