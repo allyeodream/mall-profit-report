@@ -1,4 +1,4 @@
-# v7
+# v8
 import requests
 import json
 import os
@@ -113,7 +113,7 @@ def get_products(token):
     return cost_map
 
 def get_orders(token, date_str):
-    """결제일 기준으로 ±1일 범위에서 가져온 후 결제일로 필터링"""
+    """결제일 기준으로 ±1일 범위에서 가져온 후 결제일로 필터링 (취소 포함)"""
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
     headers = {
         "Authorization": "Bearer " + token,
@@ -132,15 +132,21 @@ def get_orders(token, date_str):
     r = requests.get(url, headers=headers, params=params)
     all_orders = r.json().get("orders", [])
 
-    # 결제일 기준으로 필터링
+    # 결제일 기준으로 필터링 (취소 포함)
     filtered = [
         o for o in all_orders
         if o.get("payment_date", "")[:10] == date_str
     ]
-    print("결제일 기준 주문수: " + str(len(filtered)) + "건")
-    return filtered
+
+    # 취소 주문 분리
+    normal = [o for o in filtered if o.get("canceled") != "T"]
+    canceled = [o for o in filtered if o.get("canceled") == "T"]
+
+    print("결제일 기준 주문수: " + str(len(normal)) + "건 (취소: " + str(len(canceled)) + "건)")
+    return normal, canceled
 
 def get_refunds(token, date_str):
+    """당일 환불된 금액 가져오기"""
     try:
         url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/refunds"
         headers = {
@@ -241,13 +247,18 @@ def main():
     cost_map = get_products(token)
 
     print("어제(" + yesterday_display + ") 주문 데이터 불러오는 중...")
-    orders = get_orders(token, yesterday_str)
+    normal_orders, canceled_orders = get_orders(token, yesterday_str)
 
     print("환불 데이터 불러오는 중...")
     total_refund, refund_count = get_refunds(token, yesterday_str)
 
+    # 취소 금액 계산
+    total_cancel = sum(calc_payment(o) for o in canceled_orders)
+    cancel_count = len(canceled_orders)
+
+    # 정상 주문 처리
     results = []
-    for order in orders:
+    for order in normal_orders:
         try:
             items = get_order_items(token, order["order_id"])
             result = calc_profit(order, items, cost_map)
@@ -264,12 +275,15 @@ def main():
     total_shipping = sum(r["택배비_순"] for r in results)
     total_pg = sum(r["PG수수료"] for r in results)
     daily_fixed = get_daily_fixed_cost()
-    net_sales = total_sales - total_refund
+
+    # 순매출 = 매출 - 환불 - 취소
+    net_sales = total_sales - total_refund - total_cancel
     total_profit = net_sales - total_cost - total_shipping - total_pg - daily_fixed
 
     print("\n📊 [" + yesterday_display + " 리포트]")
-    print("💰 매출        " + f"{int(total_sales):>12,}원")
+    print("💰 매출        " + f"{int(total_sales):>12,}원  ({len(results)}건)")
     print("↩️  환불        " + f"{int(total_refund):>12,}원  ({refund_count}건)")
+    print("❌ 취소        " + f"{int(total_cancel):>12,}원  ({cancel_count}건)")
     print("💰 순매출      " + f"{int(net_sales):>12,}원")
     print("─────────────────────────────")
     print("📦 원가(부가세포함) " + f"{int(total_cost):>8,}원")
