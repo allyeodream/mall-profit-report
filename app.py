@@ -168,6 +168,11 @@ def get_daily_fixed_cost():
 def calc_profit(order, items, cost_map):
     payment = float(order.get("payment_amount") or 0)
     if payment == 0:
+        # 네이버페이 적립금 등 0원 결제 → 주문금액 + 배송비 사용
+        order_price = float(order.get("actual_order_amount", {}).get("order_price_amount") or 0)
+        shipping_fee = float(order.get("actual_order_amount", {}).get("shipping_fee") or 0)
+        payment = order_price + shipping_fee
+    if payment == 0:
         return None
 
     total_cost = 0
