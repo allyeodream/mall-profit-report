@@ -1,4 +1,4 @@
-# v8
+# v9
 import requests
 import json
 import os
@@ -113,7 +113,7 @@ def get_products(token):
     return cost_map
 
 def get_orders(token, date_str):
-    """결제일 기준으로 ±1일 범위에서 가져온 후 결제일로 필터링 (취소 포함)"""
+    """결제일 기준으로 ±1일 범위에서 가져온 후 결제일로 필터링"""
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
     headers = {
         "Authorization": "Bearer " + token,
@@ -132,7 +132,7 @@ def get_orders(token, date_str):
     r = requests.get(url, headers=headers, params=params)
     all_orders = r.json().get("orders", [])
 
-    # 결제일 기준으로 필터링 (취소 포함)
+    # 결제일 기준으로 필터링
     filtered = [
         o for o in all_orders
         if o.get("payment_date", "")[:10] == date_str
@@ -146,7 +146,6 @@ def get_orders(token, date_str):
     return normal, canceled
 
 def get_refunds(token, date_str):
-    """당일 환불된 금액 가져오기"""
     try:
         url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/refunds"
         headers = {
@@ -184,13 +183,23 @@ def get_daily_fixed_cost():
 
 def calc_payment(order):
     """실결제금액 계산
-    - 일반 결제: payment_amount (쿠폰/포인트 이미 반영된 금액)
+    - 일반 결제: payment_amount
     - 0원 결제(네이버페이 선불금): order_price_amount + shipping_fee
+    - 취소 주문: initial_order_amount 기준
     """
     payment = float(order.get("payment_amount") or 0)
     if payment > 0:
         return payment
 
+    # 취소 주문은 initial_order_amount 사용
+    if order.get("canceled") == "T":
+        initial = order.get("initial_order_amount", {})
+        initial_pay = float(initial.get("payment_amount") or 0)
+        if initial_pay > 0:
+            return initial_pay
+        return float(initial.get("order_price_amount") or 0) + float(initial.get("shipping_fee") or 0)
+
+    # 네이버페이 선불금 등 0원 결제
     actual = order.get("actual_order_amount", {})
     order_price = float(actual.get("order_price_amount") or 0)
     shipping_fee = float(actual.get("shipping_fee") or 0)
@@ -255,6 +264,7 @@ def main():
     # 취소 금액 계산
     total_cancel = sum(calc_payment(o) for o in canceled_orders)
     cancel_count = len(canceled_orders)
+    print("취소 건수: " + str(cancel_count) + "건, 금액: " + str(int(total_cancel)))
 
     # 정상 주문 처리
     results = []
