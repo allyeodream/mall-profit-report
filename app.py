@@ -1,4 +1,4 @@
-# v4
+# v5
 import requests
 import json
 import os
@@ -113,20 +113,32 @@ def get_products(token):
     return cost_map
 
 def get_orders(token, date_str):
+    """결제일 기준으로 ±1일 범위에서 가져온 후 결제일로 필터링"""
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
     headers = {
         "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
         "X-Cafe24-Api-Version": "2025-12-01"
     }
+    target = datetime.strptime(date_str, "%Y-%m-%d")
+    start = (target - timedelta(days=1)).strftime("%Y-%m-%d")
+    end = (target + timedelta(days=1)).strftime("%Y-%m-%d")
+
     params = {
-        "start_date": date_str,
-        "end_date": date_str,
+        "start_date": start,
+        "end_date": end,
         "limit": 100,
-        "canceled": "F"
     }
     r = requests.get(url, headers=headers, params=params)
-    return r.json().get("orders", [])
+    all_orders = r.json().get("orders", [])
+
+    # 결제일 기준으로 필터링
+    filtered = [
+        o for o in all_orders
+        if o.get("payment_date", "")[:10] == date_str
+    ]
+    print("결제일 기준 주문수: " + str(len(filtered)) + "건")
+    return filtered
 
 def get_refunds(token, date_str):
     try:
@@ -164,12 +176,24 @@ def get_daily_fixed_cost():
     total = sum(MONTHLY_FIXED_COSTS.values())
     return round(total / 30)
 
-def calc_profit(order, items, cost_map):
+def calc_payment(order):
+    """카페24 기준 매출 계산"""
+    actual = order.get("actual_order_amount", {})
     payment = float(order.get("payment_amount") or 0)
+    order_price = float(actual.get("order_price_amount") or 0)
+    shipping_fee = float(actual.get("shipping_fee") or 0)
+    coupon = float(actual.get("coupon_discount_price") or 0)
+    incentive = float(actual.get("point_incentive_amount") or 0)
+
     if payment == 0:
-        order_price = float(order.get("actual_order_amount", {}).get("order_price_amount") or 0)
-        shipping_fee = float(order.get("actual_order_amount", {}).get("shipping_fee") or 0)
-        payment = order_price + shipping_fee
+        base = order_price + shipping_fee
+    else:
+        base = payment
+
+    return base + coupon + incentive
+
+def calc_profit(order, items, cost_map):
+    payment = calc_payment(order)
     if payment == 0:
         return None
 
@@ -183,10 +207,13 @@ def calc_profit(order, items, cost_map):
         cost_with_vat = supply * (1 + VAT_RATE)
         total_cost += cost_with_vat * qty
 
-    if payment >= FREE_SHIPPING_MIN:
+    actual = order.get("actual_order_amount", {})
+    shipping_fee = float(actual.get("shipping_fee") or 0)
+
+    if shipping_fee == 0:
         shipping_net = SHIPPING_COST_ACTUAL
     else:
-        shipping_net = SHIPPING_COST_ACTUAL - SHIPPING_FEE_CHARGED
+        shipping_net = SHIPPING_COST_ACTUAL - shipping_fee
 
     pg_fee = payment * PG_FEE_RATE
     profit = payment - total_cost - shipping_net - pg_fee
