@@ -1,4 +1,4 @@
-# v10
+# v11
 import requests
 import json
 import os
@@ -20,8 +20,18 @@ META_AD_ACCOUNT_ID = os.environ.get("META_AD_ACCOUNT_ID", "act_3392614924401380"
 SHIPPING_COST_ACTUAL = 1980
 SHIPPING_FEE_CHARGED = 3000
 FREE_SHIPPING_MIN = 70000
-PG_FEE_RATE = 0.022
 VAT_RATE = 0.1
+
+# 결제수단별 PG수수료율 (VAT 포함)
+PG_FEE_RATES = {
+    "card":    0.022,   # 신용카드 (기본)
+    "prepaid": 0.0374,  # 네이버페이 선불금/포인트/머니
+    "cash":    0.01,    # 무통장입금
+    "tcash":   0.0165,  # 실시간계좌이체
+    "cell":    0.0385,  # 휴대폰결제
+    "etc":     0.022,   # 기타
+}
+PG_FEE_RATE = 0.022  # 기본값 (fallback)
 
 MONTHLY_FIXED_COSTS = {
     "카페24_이용료": 0,
@@ -234,6 +244,15 @@ def calc_payment(order):
     shipping_fee = float(actual.get("shipping_fee") or 0)
     return order_price + shipping_fee
 
+def get_pg_fee_rate(order):
+    """결제수단별 PG수수료율 반환"""
+    methods = order.get("payment_method", [])
+    if isinstance(methods, list):
+        for m in methods:
+            if m in PG_FEE_RATES:
+                return PG_FEE_RATES[m]
+    return PG_FEE_RATE
+
 def calc_profit(order, items, cost_map):
     payment = calc_payment(order)
     if payment == 0:
@@ -257,7 +276,8 @@ def calc_profit(order, items, cost_map):
     else:
         shipping_net = SHIPPING_COST_ACTUAL - shipping_fee
 
-    pg_fee = payment * PG_FEE_RATE
+    pg_rate = get_pg_fee_rate(order)
+    pg_fee = payment * pg_rate
     profit = payment - total_cost - shipping_net - pg_fee
 
     return {
