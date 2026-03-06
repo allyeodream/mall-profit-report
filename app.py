@@ -1,4 +1,4 @@
-# v3
+# v4
 import requests
 import json
 import os
@@ -129,7 +129,6 @@ def get_orders(token, date_str):
     return r.json().get("orders", [])
 
 def get_refunds(token, date_str):
-    """당일 환불된 금액 가져오기"""
     try:
         url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/refunds"
         headers = {
@@ -168,7 +167,6 @@ def get_daily_fixed_cost():
 def calc_profit(order, items, cost_map):
     payment = float(order.get("payment_amount") or 0)
     if payment == 0:
-        # 네이버페이 적립금 등 0원 결제 → 주문금액 + 배송비 사용
         order_price = float(order.get("actual_order_amount", {}).get("order_price_amount") or 0)
         shipping_fee = float(order.get("actual_order_amount", {}).get("shipping_fee") or 0)
         payment = order_price + shipping_fee
@@ -223,7 +221,7 @@ def main():
     print("환불 데이터 불러오는 중...")
     total_refund, refund_count = get_refunds(token, yesterday_str)
 
-results = []
+    results = []
     for order in orders:
         try:
             items = get_order_items(token, order["order_id"])
