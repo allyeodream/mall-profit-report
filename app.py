@@ -1,4 +1,4 @@
-# v9
+# v10
 import requests
 import json
 import os
@@ -12,6 +12,10 @@ CLIENT_SECRET = "wvQ7TNzkEl1itP1MTSbWVD"
 MALL_ID = "tpgus432"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# 메타 광고 설정
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
+META_AD_ACCOUNT_ID = os.environ.get("META_AD_ACCOUNT_ID", "act_3392614924401380")
 
 SHIPPING_COST_ACTUAL = 1980
 SHIPPING_FEE_CHARGED = 3000
@@ -95,6 +99,40 @@ def get_valid_token():
 
     return None
 
+def get_meta_ad_spend(date_str):
+    """메타 광고비 조회"""
+    if not META_ACCESS_TOKEN:
+        print("⚠️ META_ACCESS_TOKEN 없음 - 광고비 0원으로 처리")
+        return 0
+
+    try:
+        url = f"https://graph.facebook.com/v19.0/{META_AD_ACCOUNT_ID}/insights"
+        params = {
+            "access_token": META_ACCESS_TOKEN,
+            "fields": "spend",
+            "time_range": json.dumps({"since": date_str, "until": date_str}),
+            "level": "account",
+        }
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+
+        if "error" in data:
+            print(f"⚠️ 메타 API 오류: {data['error'].get('message', '')}")
+            return 0
+
+        results = data.get("data", [])
+        if results:
+            spend = float(results[0].get("spend", 0))
+            print(f"📣 메타 광고비: {int(spend):,}원")
+            return round(spend)
+        else:
+            print("📣 메타 광고비: 0원 (데이터 없음)")
+            return 0
+
+    except Exception as e:
+        print(f"⚠️ 메타 광고비 조회 오류: {str(e)}")
+        return 0
+
 def get_products(token):
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/products"
     headers = {
@@ -132,13 +170,11 @@ def get_orders(token, date_str):
     r = requests.get(url, headers=headers, params=params)
     all_orders = r.json().get("orders", [])
 
-    # 결제일 기준으로 필터링
     filtered = [
         o for o in all_orders
         if o.get("payment_date", "")[:10] == date_str
     ]
 
-    # 취소 주문 분리
     normal = [o for o in filtered if o.get("canceled") != "T"]
     canceled = [o for o in filtered if o.get("canceled") == "T"]
 
@@ -182,16 +218,10 @@ def get_daily_fixed_cost():
     return round(total / 30)
 
 def calc_payment(order):
-    """실결제금액 계산
-    - 일반 결제: payment_amount
-    - 0원 결제(네이버페이 선불금): order_price_amount + shipping_fee
-    - 취소 주문: initial_order_amount 기준
-    """
     payment = float(order.get("payment_amount") or 0)
     if payment > 0:
         return payment
 
-    # 취소 주문은 initial_order_amount 사용
     if order.get("canceled") == "T":
         initial = order.get("initial_order_amount", {})
         initial_pay = float(initial.get("payment_amount") or 0)
@@ -199,7 +229,6 @@ def calc_payment(order):
             return initial_pay
         return float(initial.get("order_price_amount") or 0) + float(initial.get("shipping_fee") or 0)
 
-    # 네이버페이 선불금 등 0원 결제
     actual = order.get("actual_order_amount", {})
     order_price = float(actual.get("order_price_amount") or 0)
     shipping_fee = float(actual.get("shipping_fee") or 0)
@@ -261,6 +290,9 @@ def main():
     print("환불 데이터 불러오는 중...")
     total_refund, refund_count = get_refunds(token, yesterday_str)
 
+    print("메타 광고비 불러오는 중...")
+    meta_ad_spend = get_meta_ad_spend(yesterday_str)
+
     # 취소 금액 계산
     total_cancel = sum(calc_payment(o) for o in canceled_orders)
     cancel_count = len(canceled_orders)
@@ -288,7 +320,7 @@ def main():
 
     # 순매출 = 매출 - 환불 - 취소
     net_sales = total_sales - total_refund - total_cancel
-    total_profit = net_sales - total_cost - total_shipping - total_pg - daily_fixed
+    total_profit = net_sales - total_cost - total_shipping - total_pg - daily_fixed - meta_ad_spend
 
     print("\n📊 [" + yesterday_display + " 리포트]")
     print("💰 매출        " + f"{int(total_sales):>12,}원  ({len(results)}건)")
@@ -300,6 +332,7 @@ def main():
     print("🚚 택배비(순)   " + f"{int(total_shipping):>12,}원")
     print("💳 PG수수료     " + f"{int(total_pg):>12,}원")
     print("🏢 고정비용     " + f"{int(daily_fixed):>12,}원")
+    print("📣 메타광고비   " + f"{int(meta_ad_spend):>12,}원")
     print("─────────────────────────────")
     print("✅ 순수익       " + f"{int(total_profit):>12,}원")
     if net_sales > 0:
