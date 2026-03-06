@@ -129,9 +129,9 @@ def get_orders(token, date_str):
     return r.json().get("orders", [])
 
 def get_refunds(token, date_str):
-    """당일 환불된 주문 가져오기"""
+    """당일 환불된 금액 가져오기"""
     try:
-        url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
+        url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/refunds"
         headers = {
             "Authorization": "Bearer " + token,
             "Content-Type": "application/json",
@@ -140,14 +140,13 @@ def get_refunds(token, date_str):
         params = {
             "start_date": date_str,
             "end_date": date_str,
-            "limit": 100,
-            "canceled": "T"
+            "limit": 100
         }
         r = requests.get(url, headers=headers, params=params, timeout=10)
-        orders = r.json().get("orders", [])
-        total_refund = sum(float(o.get("payment_amount") or 0) for o in orders)
-        print("환불 건수: " + str(len(orders)) + "건, 금액: " + str(round(total_refund)))
-        return round(total_refund), len(orders)
+        refunds = r.json().get("refunds", [])
+        total_refund = sum(float(rf.get("actual_refund_amount") or 0) for rf in refunds)
+        print("환불 건수: " + str(len(refunds)) + "건, 금액: " + str(round(total_refund)))
+        return round(total_refund), len(refunds)
     except Exception as e:
         print("⚠️ 환불 데이터 오류: " + str(e))
         return 0, 0
