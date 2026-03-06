@@ -1,4 +1,4 @@
-# v5
+# v7
 import requests
 import json
 import os
@@ -177,20 +177,18 @@ def get_daily_fixed_cost():
     return round(total / 30)
 
 def calc_payment(order):
-    """카페24 기준 매출 계산"""
-    actual = order.get("actual_order_amount", {})
+    """실결제금액 계산
+    - 일반 결제: payment_amount (쿠폰/포인트 이미 반영된 금액)
+    - 0원 결제(네이버페이 선불금): order_price_amount + shipping_fee
+    """
     payment = float(order.get("payment_amount") or 0)
+    if payment > 0:
+        return payment
+
+    actual = order.get("actual_order_amount", {})
     order_price = float(actual.get("order_price_amount") or 0)
     shipping_fee = float(actual.get("shipping_fee") or 0)
-    coupon = float(actual.get("coupon_discount_price") or 0)
-    incentive = float(actual.get("point_incentive_amount") or 0)
-
-    if payment == 0:
-        base = order_price + shipping_fee
-    else:
-        base = payment
-
-    return base + coupon + incentive
+    return order_price + shipping_fee
 
 def calc_profit(order, items, cost_map):
     payment = calc_payment(order)
