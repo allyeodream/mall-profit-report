@@ -130,22 +130,27 @@ def get_orders(token, date_str):
 
 def get_refunds(token, date_str):
     """당일 환불된 주문 가져오기"""
-    url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
-    headers = {
-        "Authorization": "Bearer " + token,
-        "Content-Type": "application/json",
-        "X-Cafe24-Api-Version": "2025-12-01"
-    }
-    params = {
-        "start_date": date_str,
-        "end_date": date_str,
-        "limit": 100,
-        "canceled": "T"
-    }
-    r = requests.get(url, headers=headers, params=params)
-    orders = r.json().get("orders", [])
-    total_refund = sum(float(o.get("payment_amount") or 0) for o in orders)
-    return round(total_refund), len(orders)
+    try:
+        url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders"
+        headers = {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+            "X-Cafe24-Api-Version": "2025-12-01"
+        }
+        params = {
+            "start_date": date_str,
+            "end_date": date_str,
+            "limit": 100,
+            "canceled": "T"
+        }
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        orders = r.json().get("orders", [])
+        total_refund = sum(float(o.get("payment_amount") or 0) for o in orders)
+        print("환불 건수: " + str(len(orders)) + "건, 금액: " + str(round(total_refund)))
+        return round(total_refund), len(orders)
+    except Exception as e:
+        print("⚠️ 환불 데이터 오류: " + str(e))
+        return 0, 0
 
 def get_order_items(token, order_id):
     url = "https://" + MALL_ID + ".cafe24api.com/api/v2/admin/orders/" + str(order_id) + "/items"
