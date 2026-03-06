@@ -218,12 +218,18 @@ def main():
     print("환불 데이터 불러오는 중...")
     total_refund, refund_count = get_refunds(token, yesterday_str)
 
-    results = []
+results = []
     for order in orders:
-        items = get_order_items(token, order["order_id"])
-        result = calc_profit(order, items, cost_map)
-        if result:
-            results.append(result)
+        try:
+            items = get_order_items(token, order["order_id"])
+            result = calc_profit(order, items, cost_map)
+            if result:
+                results.append(result)
+        except Exception as e:
+            print("⚠️ 주문 처리 오류: " + str(e))
+            continue
+
+    print("주문 처리 완료: " + str(len(results)) + "건")
 
     total_sales = sum(r["매출"] for r in results)
     total_cost = sum(r["원가_부가세포함"] for r in results)
